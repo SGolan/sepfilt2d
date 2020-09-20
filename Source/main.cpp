@@ -22,10 +22,6 @@ using namespace cv;
     #define FLOAT double
 #endif
 
-enum {GAUSSIAN_MCR, GAUSSIAN_CLASSIC};
-#define GAUSSIAN_FILTER GAUSSIAN_MCR
-
-
 
 void ExitPrompt(int aReturnCode)
 {
@@ -35,9 +31,9 @@ void ExitPrompt(int aReturnCode)
 }
 
 
-Mat	ImgIn 		;		// input image
-Mat	ImgOut		;		// output image : traditional 2D filter
-Mat	ImgOutSep	;		// output image : 2-pass 1D filter
+Mat	ImgIn 	 , ImgInDisplay		;		// input image
+Mat	ImgOut   , ImgOutDisplay	;		// output image : traditional 2D filter
+Mat	ImgOutSep, ImgOutSepDisplay	;		// output image : 2-pass 1D filter
 
 
 int main()
@@ -61,7 +57,6 @@ int main()
 	ImgIn.convertTo(ImgIn, CV_FLOAT_TYPE);
 
 	// initialize 2D-gaussian-kernel
-#if GAUSSIAN_FILTER == GAUSSIAN_MCR
 	FLOAT coeffs[25] = { 4,  14,  22,  14,  4,	   //   58
 						14,  61, 101,  61, 14,	   //  251
 						22, 101, 164, 101, 22,	   //  410
@@ -69,15 +64,6 @@ int main()
 						 4,  14, 22,   14,  4  };  //   58
 						                           //  ----
 												    // 1028
-#else
-	FLOAT coeffs[25] = { 1,   4,  7,   4,   1,	    //   17
-						      4,  16, 26,  16,   4,	    //   66
-						      7,  26, 41,  26,   7,	    //  107
-						      4,  16, 26,  16,   4,	    //   66
-						      1,   4,  7,   4,   1,  }; //  17
-						                                //  ----
-												        //  273
-#endif
 	Mat K = Mat(5, 5, CV_FLOAT_TYPE, coeffs);
 	//kernel *= (1.0/1028.0);
 
@@ -89,13 +75,16 @@ int main()
   	Point anchor =  Point(-1, -1);
   	int delta    =  0            ;
   	int ddepth   = -1            ;
+	auto start1 = std::chrono::system_clock::now();
 	filter2D(ImgIn, ImgOut, CV_FLOAT_TYPE, K, anchor, delta);
+	auto end1 = std::chrono::system_clock::now();
+	auto elapsed1 =  std::chrono::duration_cast<std::chrono::milliseconds>(end1 - start1);		
 	// normalize filtering result for display by imshow
-	normalize(ImgIn, ImgIn, 0, 1, cv::NORM_MINMAX);
+	normalize(ImgIn, ImgInDisplay, 0, 1, cv::NORM_MINMAX);
 	// display the input & output images
-	imshow("input", ImgIn);
-	normalize(ImgOut, ImgOut, 0, 1, cv::NORM_MINMAX);
-	imshow("filter2D result", ImgOut);
+	imshow("input", ImgInDisplay);
+	normalize(ImgOut, ImgOutDisplay, 0, 1, cv::NORM_MINMAX);
+	imshow("filter2D result", ImgOutDisplay);
 
 	// decomposing the 5x5 2D-filter into two 1x5 1D filters
 	Mat Sv, U, Vt;
@@ -125,13 +114,48 @@ int main()
 	std::cout <<  Ktag2 << std::endl;
 
 	// apply the seperated 1D filter
-	sepFilter2D	(ImgIn, ImgOutSep, CV_FLOAT_TYPE, Kv, Kv);
-	normalize(ImgOutSep, ImgOutSep, 0, 1, cv::NORM_MINMAX);
+	auto start2 = std::chrono::system_clock::now();
+	sepFilter2D	(ImgIn, ImgOutSep, CV_FLOAT_TYPE, Kv, Kv.t());
+	auto end2 = std::chrono::system_clock::now();
+	auto elapsed2 =  std::chrono::duration_cast<std::chrono::milliseconds>(end2 - start2);
+
+	normalize(ImgOutSep, ImgOutSepDisplay, 0, 1, cv::NORM_MINMAX);
 	// display sep-filter result
-	imshow("sepFilter2D result", ImgOutSep);
+	imshow("sepFilter2D result", ImgOutSepDisplay);
+
+	// zoon-in  
+	cv::Rect CropRect(256, 256, 31, 31);
+	Mat ImgInDisplayCrop     = ImgInDisplay    (CropRect); resize(ImgInDisplayCrop    , ImgInDisplayCrop    , Size(), 16, 16);
+	Mat ImgOutDisplayCrop    = ImgOutDisplay   (CropRect); resize(ImgOutDisplayCrop   , ImgOutDisplayCrop   , Size(), 16, 16);
+	Mat ImgOutSepDisplayCrop = ImgOutSepDisplay(CropRect); resize(ImgOutSepDisplayCrop, ImgOutSepDisplayCrop, Size(), 16, 16);
+	imshow("Cropped input"             , ImgInDisplayCrop    );
+	imshow("Cropped filter2D result"   , ImgOutDisplayCrop   );
+	imshow("Cropped sepFilter2D result", ImgOutSepDisplayCrop);
+
+	// compare images
+	double MaxRelativeDiff = 0, AvRelativeDiff = 0 ;
+	for(int i=3; i<ImgOut.rows-3; i++)
+	{
+   		for(int j=3; j<ImgOut.cols-3; j++) 
+		{
+			FLOAT pixel1 = ImgOut.at<FLOAT>(i, j)   ;
+			FLOAT pixel2 = ImgOutSep.at<FLOAT>(i, j);
+			double RelativeDiff = abs((pixel1 - pixel2)/pixel1);
+			MaxRelativeDiff = max(MaxRelativeDiff, RelativeDiff);
+			AvRelativeDiff += RelativeDiff;
+		}
+ 	}
+	AvRelativeDiff /= static_cast<double>(ImgOut.rows*ImgOut.cols);
+	// print max relative diff
+	std::cout << "max relative diff     = " << MaxRelativeDiff << std::endl;
+	std::cout << "average relative diff = " << AvRelativeDiff  << std::endl;
+	
+	// print time measurements
+	std::cout << "filter2D time    : "  <<  std::chrono::duration<double>(elapsed1).count() << "[ms]" << std::endl;	
+	std::cout << "sepFilter2D time : "  <<  std::chrono::duration<double>(elapsed2).count() << "[ms]" << std::endl;					
 
 	
-	printf("\r\nDone\r\n");
+	std::cout << "\r\nDone\r\n";
 	waitKey(0);
 
 	return 0;
