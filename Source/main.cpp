@@ -15,7 +15,7 @@
 
 using namespace cv;
 
-#define CV_FLOAT_TYPE CV_64F	
+#define CV_FLOAT_TYPE CV_32F	
 #if CV_FLOAT_TYPE == CV_32F	
     #define FLOAT float
 #else
